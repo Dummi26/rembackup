@@ -33,7 +33,13 @@ pub fn apply_indexchanges_int(
         match change {
             IndexChange::AddDir(dir) => {
                 let t = target.join(dir);
-                if let Err(e) = fs::create_dir(&t) {
+                if let Some(e) = fs::create_dir(&t).err().and_then(|e| {
+                    if matches!(e.kind(), io::ErrorKind::AlreadyExists) {
+                        None
+                    } else {
+                        Some(e)
+                    }
+                }) {
                     eprintln!("\n[warn] couldn't create directory {t:?}: {e}");
                 } else {
                     fs::create_dir(&index.join(dir))?;
