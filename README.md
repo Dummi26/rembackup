@@ -49,7 +49,3 @@ Note 2: `~/index` and `/mnt/backup` don't need to exist yet - they will be creat
 If this is the first backup, you can try to maximize the speed of `/mnt/backup`.
 If you want remote backups, you should probably connect the server's disk directly to your computer.
 The backups after the initial one will be a lot faster, so you can switch to remote backups after this.
-
-## TODO
-
-detect files that have been removed

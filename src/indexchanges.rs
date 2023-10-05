@@ -8,4 +8,8 @@ pub enum IndexChange {
     AddDir(PathBuf),
     /// Add or update a file
     AddFile(PathBuf, IndexFile),
+    /// Remove a file
+    RemoveFile(PathBuf),
+    /// Remove a directory (recursively)
+    RemoveDir(PathBuf),
 }

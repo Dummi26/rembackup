@@ -53,6 +53,24 @@ pub fn apply_indexchanges_int(
                 }
                 fs::write(&index.join(file), index_file.save())?;
             }
+            IndexChange::RemoveFile(file) => {
+                let i = index.join(file);
+                let t = target.join(file);
+                if let Err(e) = fs::remove_file(&t) {
+                    eprintln!("\n[warn] couldn't remove file {t:?}, keeping index file {i:?}: {e:?}\n     If this error keeps appearing, check if the file was deleted on the target system but still exists in the index. if yes, consider manually deleting it.");
+                } else {
+                    fs::remove_file(i)?;
+                }
+            }
+            IndexChange::RemoveDir(dir) => {
+                let i = index.join(dir);
+                let t = target.join(dir);
+                if let Err(e) = fs::remove_dir_all(&t) {
+                    eprintln!("\n[warn] couldn't remove directory {t:?}, keeping index files under {i:?}: {e:?}\n     If this error keeps appearing, check if the directory was deleted on the target system but still exists in the index. if yes, consider manually deleting it.");
+                } else {
+                    fs::remove_dir_all(i)?;
+                }
+            }
         }
         {
             let i = i + 1;

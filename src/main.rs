@@ -29,25 +29,28 @@ fn main() {
     if changes.is_empty() {
         eprintln!("done! found no changes.");
     } else {
-        eprintln!("done! found {} changes.", changes.len());
+        eprintln!("done! found {} changes:", changes.len());
         // display the changes
-        eprintln!(" - - - - -");
         for change in &changes {
             match change {
-                IndexChange::AddDir(v) => eprintln!(" - Add the directory {v:?}"),
-                IndexChange::AddFile(v, _) => eprintln!(" - Add the file {v:?}"),
+                IndexChange::AddDir(v) => eprintln!("  >> {}", v.display()),
+                IndexChange::AddFile(v, _) => eprintln!("  +  {}", v.display()),
+                IndexChange::RemoveFile(v) => eprintln!("  -  {}", v.display()),
+                IndexChange::RemoveDir(v) => eprintln!(" [-] {}", v.display()),
             }
         }
-        eprintln!(
-            "Press Enter to add these {} changes to the backup.",
-            changes.len()
-        );
+        eprintln!(" - - - - -");
+        eprintln!("  >> add directory");
+        eprintln!("  +  add/update file");
+        eprintln!("  -  remove file");
+        eprintln!(" [-] remove directory (and all contents!)");
+        eprintln!("Press Enter to to apply these actions.");
         // apply changes
         if std::io::stdin().read_line(&mut String::new()).is_ok() {
             match apply_indexchanges(&args.source, &args.index, &args.target, &changes) {
                 Ok(()) => {}
                 Err(e) => {
-                    eprintln!("Failed to apply index changes: {e}");
+                    eprintln!("Failed to apply: {e}");
                     exit(30);
                 }
             }
