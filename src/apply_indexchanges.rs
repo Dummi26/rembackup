@@ -1,4 +1,7 @@
-use std::{fs, io, path::Path};
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+};
 
 use crate::{indexchanges::IndexChange, repr_file::ReprFile};
 
@@ -8,7 +11,7 @@ use crate::{indexchanges::IndexChange, repr_file::ReprFile};
 pub fn apply_indexchanges(
     source: &Path,
     index: &Path,
-    target: &Path,
+    target: &Option<PathBuf>,
     changes: &Vec<IndexChange>,
 ) -> io::Result<()> {
     let o = apply_indexchanges_int(source, index, target, changes);
@@ -18,7 +21,7 @@ pub fn apply_indexchanges(
 pub fn apply_indexchanges_int(
     source: &Path,
     index: &Path,
-    target: &Path,
+    target: &Option<PathBuf>,
     changes: &Vec<IndexChange>,
 ) -> io::Result<()> {
     let len_width = changes.len().to_string().len();
@@ -32,42 +35,75 @@ pub fn apply_indexchanges_int(
     for (i, change) in changes.iter().enumerate() {
         match change {
             IndexChange::AddDir(dir) => {
-                let t = target.join(dir);
-                if let Some(e) = fs::create_dir(&t).err().and_then(|e| {
-                    if matches!(e.kind(), io::ErrorKind::AlreadyExists) {
-                        None
+                let ok = if let Some(target) = target {
+                    let t = target.join(dir);
+                    if let Some(e) = fs::create_dir(&t).err().and_then(|e| {
+                        if matches!(e.kind(), io::ErrorKind::AlreadyExists) {
+                            None
+                        } else {
+                            Some(e)
+                        }
+                    }) {
+                        eprintln!("\n[warn] couldn't create directory {t:?}: {e}");
+                        false
                     } else {
-                        Some(e)
+                        true
                     }
-                }) {
-                    eprintln!("\n[warn] couldn't create directory {t:?}: {e}");
                 } else {
+                    true
+                };
+                if ok {
                     fs::create_dir(&index.join(dir))?;
                 }
             }
             IndexChange::AddFile(file, index_file) => {
-                let s = source.join(file);
-                let t = target.join(file);
-                if let Err(e) = fs::copy(&s, &t) {
-                    eprintln!("\n[warn] couldn't copy file from {s:?} to {t:?}: {e}");
+                let ok = if let Some(target) = target {
+                    let s = source.join(file);
+                    let t = target.join(file);
+                    if let Err(e) = fs::copy(&s, &t) {
+                        eprintln!("\n[warn] couldn't copy file from {s:?} to {t:?}: {e}");
+                        false
+                    } else {
+                        true
+                    }
+                } else {
+                    true
+                };
+                if ok {
+                    fs::write(&index.join(file), index_file.save())?;
                 }
-                fs::write(&index.join(file), index_file.save())?;
             }
             IndexChange::RemoveFile(file) => {
                 let i = index.join(file);
-                let t = target.join(file);
-                if let Err(e) = fs::remove_file(&t) {
-                    eprintln!("\n[warn] couldn't remove file {t:?}, keeping index file {i:?}: {e:?}\n     If this error keeps appearing, check if the file was deleted on the target system but still exists in the index. if yes, consider manually deleting it.");
+                let ok = if let Some(target) = target {
+                    let t = target.join(file);
+                    if let Err(e) = fs::remove_file(&t) {
+                        eprintln!("\n[warn] couldn't remove file {t:?}, keeping index file {i:?}: {e:?}\n     If this error keeps appearing, check if the file was deleted on the target system but still exists in the index. if yes, consider manually deleting it.");
+                        false
+                    } else {
+                        true
+                    }
                 } else {
+                    true
+                };
+                if ok {
                     fs::remove_file(i)?;
                 }
             }
             IndexChange::RemoveDir(dir) => {
                 let i = index.join(dir);
-                let t = target.join(dir);
-                if let Err(e) = fs::remove_dir_all(&t) {
-                    eprintln!("\n[warn] couldn't remove directory {t:?}, keeping index files under {i:?}: {e:?}\n     If this error keeps appearing, check if the directory was deleted on the target system but still exists in the index. if yes, consider manually deleting it.");
+                let ok = if let Some(target) = target {
+                    let t = target.join(dir);
+                    if let Err(e) = fs::remove_dir_all(&t) {
+                        eprintln!("\n[warn] couldn't remove directory {t:?}, keeping index files under {i:?}: {e:?}\n     If this error keeps appearing, check if the directory was deleted on the target system but still exists in the index. if yes, consider manually deleting it.");
+                        false
+                    } else {
+                        true
+                    }
                 } else {
+                    true
+                };
+                if ok {
                     fs::remove_dir_all(i)?;
                 }
             }

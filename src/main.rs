@@ -45,6 +45,9 @@ fn main() {
         eprintln!("  -  remove file");
         eprintln!(" [-] remove directory (and all contents!)");
         eprintln!("Press Enter to to apply these actions.");
+        if args.target.is_none() {
+            eprintln!("[WARN] You didn't set a `target` directory!\n[WARN] Be careful not to update your index without actually applying the changes to the `target` filesystem!");
+        }
         // apply changes
         if std::io::stdin().read_line(&mut String::new()).is_ok() {
             match apply_indexchanges(&args.source, &args.index, &args.target, &changes) {
