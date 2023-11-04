@@ -2,14 +2,22 @@ use std::{collections::HashMap, fs, io, path::Path};
 
 use crate::{indexchanges::IndexChange, indexfile::IndexFile};
 
-pub fn perform_index_diff(source: &Path, index: &Path) -> io::Result<Vec<IndexChange>> {
+pub fn perform_index_diff<'a>(
+    source: &Path,
+    index: &'a Path,
+    mut ignore_subdirs: Vec<&'a Path>,
+) -> io::Result<Vec<IndexChange>> {
     let mut changes = Vec::new();
+    if let Ok(inner_index) = index.strip_prefix(source) {
+        eprintln!("[info] source contains index, but index will not be part of the backup.");
+        ignore_subdirs.push(inner_index);
+    }
     rec(
         source.as_ref(),
         Path::new(""),
         index,
         &mut changes,
-        index.strip_prefix(source).ok(),
+        &ignore_subdirs,
     )?;
     Ok(changes)
 }
@@ -23,11 +31,10 @@ fn rec(
     // list of changes to be made
     changes: &mut Vec<IndexChange>,
     // if the index is part of `source`, where exactly is it?
-    inner_index: Option<&Path>,
+    ignore_subdirs: &Vec<&Path>,
 ) -> Result<(), io::Error> {
-    if let Some(ii) = &inner_index {
+    for ii in ignore_subdirs {
         if rel_path.starts_with(ii) {
-            eprintln!("[info] source contains index, but index will not be part of the backup.");
             return Ok(());
         }
     }
@@ -62,7 +69,7 @@ fn rec(
                 &rel_path.join(entry.file_name()),
                 index_files,
                 changes,
-                inner_index,
+                ignore_subdirs,
             )?;
         } else {
             if let Some(true) = in_index_and_is_dir {

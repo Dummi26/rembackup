@@ -19,7 +19,14 @@ fn main() {
     let args = args::Args::parse();
     // index diff
     eprintln!("performing index diff...");
-    let changes = match perform_index_diff(&args.source, &args.index) {
+    let source = &args.source;
+    let index = &args.index;
+    let ignore_subdirs = args
+        .ignore
+        .iter()
+        .map(|path| path.strip_prefix(source).unwrap_or(path))
+        .collect();
+    let changes = match perform_index_diff(source, index, ignore_subdirs) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Failed to generate index diff:\n    {e}");
@@ -44,18 +51,30 @@ fn main() {
         eprintln!("  +  add/update file");
         eprintln!("  -  remove file");
         eprintln!(" [-] remove directory (and all contents!)");
-        eprintln!("Press Enter to to apply these actions.");
-        if args.target.is_none() {
-            eprintln!("[WARN] You didn't set a `target` directory!\n[WARN] Be careful not to update your index without actually applying the changes to the `target` filesystem!");
-        }
-        // apply changes
-        if std::io::stdin().read_line(&mut String::new()).is_ok() {
-            match apply_indexchanges(&args.source, &args.index, &args.target, &changes) {
-                Ok(()) => {}
-                Err(e) => {
-                    eprintln!("Failed to apply: {e}");
-                    exit(30);
+        // apply changes after confirming
+        if !args.noconfirm {
+            let mut line = String::new();
+            loop {
+                if args.target.is_none() {
+                    eprintln!("[WARN] You didn't set a `target` directory!\n[WARN] Be careful not to update your index without actually applying the changes to the `target` filesystem!\nType 'Ok' and press enter to continue.");
+                } else {
+                    eprintln!("Exclude unwanted directories/files using --ignore,\nor press enter to apply the changes.");
                 }
+                line.clear();
+                std::io::stdin().read_line(&mut line).unwrap();
+                let line = line.trim().to_lowercase();
+                if line == "exit" {
+                    return;
+                } else if args.target.is_some() || line == "ok" {
+                    break;
+                }
+            }
+        }
+        match apply_indexchanges(&args.source, &args.index, &args.target, &changes) {
+            Ok(()) => {}
+            Err(e) => {
+                eprintln!("Failed to apply: {e}");
+                exit(30);
             }
         }
     }
