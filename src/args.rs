@@ -17,7 +17,7 @@ pub struct Args {
     /// directories to ignore.
     /// can be paths relative to <source> (like backups/) or paths starting with <source> (like my_source/backups/).
     /// if <index> starts with <source>, it is automatically ignored and doesn't need to be specified.
-    #[arg(long)]
+    #[arg(long, num_args(0..))]
     pub ignore: Vec<PathBuf>,
     /// don't ask for confirmation, just apply the changes.
     #[arg(long)]
