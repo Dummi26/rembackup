@@ -6,15 +6,34 @@ use std::{
     time::SystemTime,
 };
 
-use crate::repr_file::ReprFile;
+use crate::{repr_file::ReprFile, update_index::Settings};
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct IndexFile {
-    size: u64,
-    last_modified: Option<u64>,
+    pub size: u64,
+    pub last_modified: Option<u64>,
 }
 
 impl IndexFile {
+    pub fn should_be_updated(&self, prev: &Self, settings: &Settings) -> bool {
+        self.size != prev.size
+            || ((!settings.ignore_timestamp)
+                && match (self.last_modified, prev.last_modified) {
+                    (Some(new), Some(old)) => {
+                        if new > old {
+                            true
+                        } else if new < old {
+                            !settings.dont_replace_newer
+                        } else {
+                            // same timestamp
+                            false
+                        }
+                    }
+                    (Some(new), None) => !settings.dont_replace_if_timestamp_found,
+                    (None, Some(old)) => settings.replace_if_timestamp_lost,
+                    (None, None) => settings.replace_if_timestamp_unknown,
+                })
+    }
     pub fn new_from_metadata(metadata: &Metadata) -> Self {
         Self {
             size: metadata.len(),

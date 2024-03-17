@@ -1,11 +1,33 @@
 use std::{collections::HashMap, fs, io, path::Path};
 
+use clap::Args;
+
 use crate::{indexchanges::IndexChange, indexfile::IndexFile};
+
+#[derive(Clone, Default, Args)]
+pub struct Settings {
+    /// don't update files just because their timestamp is different
+    #[arg(long)]
+    pub ignore_timestamp: bool,
+    /// keep *newer* files when the files in the source are *older*
+    #[arg(long)]
+    pub dont_replace_newer: bool,
+    /// replace files if their timestamp is unknown in both source and index
+    #[arg(long)]
+    pub replace_if_timestamp_unknown: bool,
+    /// replace files if their timestamp is unknown in source but known in index
+    #[arg(long)]
+    pub replace_if_timestamp_lost: bool,
+    /// don't replace files if their timestamp is known in source but unknown in index
+    #[arg(long)]
+    pub dont_replace_if_timestamp_found: bool,
+}
 
 pub fn perform_index_diff<'a>(
     source: &Path,
     index: &'a Path,
     mut ignore_paths: Vec<&'a Path>,
+    settings: &Settings,
 ) -> io::Result<Vec<IndexChange>> {
     let mut changes = Vec::new();
     if let Ok(inner_index) = index.strip_prefix(source) {
@@ -18,6 +40,7 @@ pub fn perform_index_diff<'a>(
         index,
         &mut changes,
         &ignore_paths,
+        settings,
     )?;
     Ok(changes)
 }
@@ -31,6 +54,7 @@ fn rec(
     // list of changes to be made
     changes: &mut Vec<IndexChange>,
     ignore_paths: &Vec<&Path>,
+    settings: &Settings,
 ) -> Result<(), io::Error> {
     // used to find removals
     let index_rel_path = index_files.join(rel_path);
@@ -63,7 +87,14 @@ fn rec(
                 // is dir, but was file -> remove file
                 changes.push(IndexChange::RemoveFile(rel_path.clone()));
             }
-            rec(source, &rel_path, index_files, changes, ignore_paths)?;
+            rec(
+                source,
+                &rel_path,
+                index_files,
+                changes,
+                ignore_paths,
+                settings,
+            )?;
         } else {
             if let Some(true) = in_index_and_is_dir {
                 // is file, but was dir -> remove dir
@@ -72,7 +103,7 @@ fn rec(
             let newif = IndexFile::new_from_metadata(&metadata);
             let oldif = IndexFile::from_path(&index_files.join(&rel_path));
             match oldif {
-                Ok(Ok(oldif)) if oldif == newif => {}
+                Ok(Ok(oldif)) if !newif.should_be_updated(&oldif, settings) => {}
                 _ => changes.push(IndexChange::AddFile(rel_path, newif)),
             }
         }

@@ -26,7 +26,7 @@ fn main() {
         .iter()
         .map(|path| path.strip_prefix(source).unwrap_or(path))
         .collect();
-    let changes = match perform_index_diff(source, index, ignore_subdirs) {
+    let changes = match perform_index_diff(source, index, ignore_subdirs, &args.settings) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Failed to generate index diff:\n    {e}");
@@ -47,10 +47,34 @@ fn main() {
             }
         }
         eprintln!(" - - - - -");
-        eprintln!("  >> add directory");
-        eprintln!("  +  add/update file");
-        eprintln!("  -  remove file");
-        eprintln!(" [-] remove directory (and all contents!)");
+        eprintln!(
+            "  >> add directory | {}x",
+            changes
+                .iter()
+                .filter(|c| matches!(c, IndexChange::AddDir(..)))
+                .count()
+        );
+        eprintln!(
+            "  +  add/update file | {}x",
+            changes
+                .iter()
+                .filter(|c| matches!(c, IndexChange::AddFile(..)))
+                .count()
+        );
+        eprintln!(
+            "  -  remove file | {}x",
+            changes
+                .iter()
+                .filter(|c| matches!(c, IndexChange::RemoveFile(..)))
+                .count()
+        );
+        eprintln!(
+            " [-] remove directory (and all contents!) | {}x",
+            changes
+                .iter()
+                .filter(|c| matches!(c, IndexChange::RemoveDir(..)))
+                .count()
+        );
         // apply changes after confirming
         if !args.noconfirm {
             let mut line = String::new();

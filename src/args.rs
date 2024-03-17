@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use clap::Parser;
 
+use crate::update_index::Settings;
+
 #[derive(Parser)]
 #[command(author, version)]
 pub struct Args {
@@ -22,4 +24,7 @@ pub struct Args {
     /// don't ask for confirmation, just apply the changes.
     #[arg(long)]
     pub noconfirm: bool,
+
+    #[command(flatten)]
+    pub settings: Settings,
 }
