@@ -1,0 +1,13 @@
+# example config for this repo
+
+# ignore all files/directories in .git except .git/index
+/= .git
+  *a
+  except
+    *= index
+
+# ignore the target directory
+/= target
+
+# and all files that match this glob pattern (.gitignore)
++* .git*

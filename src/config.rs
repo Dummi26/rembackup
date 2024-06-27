@@ -75,8 +75,7 @@ impl Specifier {
             Self::Entries(path) => path.matches(entry.path).then_some(true),
             Self::Files(path) => (!entry.is_directory && path.matches(entry.path)).then_some(true),
             Self::InDir { dir, inner } => {
-                dbg!(&inner);
-                if dbg!(inner.0.is_empty()) {
+                if inner.0.is_empty() {
                     // this has no inner things, so we just check for this directory
                     // if this is a directory and it matches, then return true
                     (entry.is_directory && dir.matches(entry.path)).then_some(true)

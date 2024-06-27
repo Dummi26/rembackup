@@ -128,15 +128,17 @@ fn main() {
         );
         // apply changes after confirming
         if !args.noconfirm {
-            let mut line = String::new();
             loop {
                 if args.target.is_none() {
                     eprintln!("[WARN] You didn't set a `target` directory!\n[WARN] Be careful not to update your index without actually applying the changes to the `target` filesystem!\nType 'Ok' and press enter to continue.");
                 } else {
                     eprintln!("Exclude unwanted directories/files using --ignore,\nor press enter to apply the changes.");
                 }
-                line.clear();
-                std::io::stdin().read_line(&mut line).unwrap();
+                let line = if let Some(Ok(v)) = std::io::stdin().lines().next() {
+                    v
+                } else {
+                    return;
+                };
                 let line = line.trim().to_lowercase();
                 if line == "exit" {
                     return;
