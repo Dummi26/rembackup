@@ -3,34 +3,85 @@ use std::process::exit;
 use clap::Parser;
 
 use crate::{
-    apply_indexchanges::apply_indexchanges, indexchanges::IndexChange,
+    apply_indexchanges::apply_indexchanges, config::Ignore, indexchanges::IndexChange,
     update_index::perform_index_diff,
 };
 
 mod apply_indexchanges;
 mod args;
+mod config;
 mod indexchanges;
 mod indexfile;
 mod repr_file;
 mod update_index;
+
+const EXIT_IGNORE_FAILED: u8 = 200;
+const EXIT_DIFF_FAILED: u8 = 20;
+const EXIT_APPLY_FAILED: u8 = 30;
 
 fn main() {
     // get args
     let args = args::Args::parse();
     // index diff
     eprintln!("performing index diff...");
-    let source = &args.source;
-    let index = &args.index;
-    let ignore_subdirs = args
-        .ignore
-        .iter()
-        .map(|path| path.strip_prefix(source).unwrap_or(path))
-        .collect();
-    let changes = match perform_index_diff(source, index, ignore_subdirs, &args.settings) {
+    let cwd = match std::env::current_dir() {
+        Ok(v) => Some(v),
+        Err(e) => {
+            eprintln!("[WARN] Couldn't get current directory (CWD): {e}");
+            None
+        }
+    };
+    let source = if args.source.is_absolute() {
+        args.source.clone()
+    } else {
+        cwd.as_ref()
+            .expect("tried to use a relative path when there is no valid CWD")
+            .join(&args.source)
+    };
+    let index = if args.index.is_absolute() {
+        args.index.clone()
+    } else {
+        cwd.as_ref()
+            .expect("tried to use a relative path when there is no valid CWD")
+            .join(&args.index)
+    };
+    let target = args.target.as_ref().map(|target| {
+        if target.is_absolute() {
+            target.clone()
+        } else {
+            cwd.as_ref()
+                .expect("tried to use a relative path when there is no valid CWD")
+                .join(target)
+        }
+    });
+    let ignore = if let Some(path) = &args.ignore {
+        match std::fs::read_to_string(path) {
+            Ok(text) => match Ignore::parse(&text) {
+                Ok(config) => config,
+                Err(e) => {
+                    eprintln!("Couldn't parse ignore-file {path:?}: {e}");
+                    exit(EXIT_IGNORE_FAILED as _);
+                }
+            },
+            Err(e) => {
+                eprintln!("Couldn't load ignore-file {path:?}: {e}");
+                exit(EXIT_IGNORE_FAILED as _);
+            }
+        }
+    } else {
+        Ignore(vec![])
+    };
+    let changes = match perform_index_diff(
+        &source,
+        &index,
+        target.as_ref().map(|v| v.as_path()),
+        ignore,
+        &args.settings,
+    ) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Failed to generate index diff:\n    {e}");
-            exit(20);
+            exit(EXIT_DIFF_FAILED as _);
         }
     };
     if changes.is_empty() {
@@ -98,7 +149,7 @@ fn main() {
             Ok(()) => {}
             Err(e) => {
                 eprintln!("Failed to apply: {e}");
-                exit(30);
+                exit(EXIT_APPLY_FAILED as _);
             }
         }
     }

@@ -2,7 +2,11 @@ use std::{collections::HashMap, fs, io, path::Path};
 
 use clap::Args;
 
-use crate::{indexchanges::IndexChange, indexfile::IndexFile};
+use crate::{
+    config::{FsEntry, Ignore, Match, Specifier},
+    indexchanges::IndexChange,
+    indexfile::IndexFile,
+};
 
 #[derive(Clone, Default, Args)]
 pub struct Settings {
@@ -26,20 +30,33 @@ pub struct Settings {
 pub fn perform_index_diff<'a>(
     source: &Path,
     index: &'a Path,
-    mut ignore_paths: Vec<&'a Path>,
+    target: Option<&'a Path>,
+    mut ignore: Ignore,
     settings: &Settings,
 ) -> io::Result<Vec<IndexChange>> {
     let mut changes = Vec::new();
     if let Ok(inner_index) = index.strip_prefix(source) {
-        eprintln!("[info] source contains index, but index will not be part of the backup.");
-        ignore_paths.push(inner_index);
+        eprintln!("[info] source contains index at {inner_index:?}, but index will not be part of the backup.");
+        ignore.0.push(Specifier::InDir {
+            dir: Match::Eq(inner_index.to_owned()),
+            inner: Ignore(vec![]),
+        });
+    }
+    if let Some(target) = target {
+        if let Ok(inner_target) = target.strip_prefix(source) {
+            eprintln!("[info] source contains target at {inner_target:?}, but target will not be part of the backup.");
+            ignore.0.push(Specifier::InDir {
+                dir: Match::Eq(inner_target.to_owned()),
+                inner: Ignore(vec![]),
+            });
+        }
     }
     rec(
         source.as_ref(),
         Path::new(""),
         index,
         &mut changes,
-        &ignore_paths,
+        &ignore,
         settings,
     )?;
     Ok(changes)
@@ -53,7 +70,7 @@ fn rec(
     index_files: &Path,
     // list of changes to be made
     changes: &mut Vec<IndexChange>,
-    ignore_paths: &Vec<&Path>,
+    ignore: &Ignore,
     settings: &Settings,
 ) -> Result<(), io::Error> {
     // used to find removals
@@ -75,26 +92,24 @@ fn rec(
     for entry in source_files {
         let entry = entry?;
         let rel_path = rel_path.join(entry.file_name());
+        let metadata = entry.metadata()?;
+
         // ignore entries
-        if ignore_paths.iter().any(|ii| &rel_path == ii) {
+        let fs_entry = FsEntry {
+            path: &rel_path,
+            is_directory: metadata.is_dir(),
+        };
+        if ignore.matches_or_default(&fs_entry) {
             continue;
         }
 
-        let metadata = entry.metadata()?;
         let in_index_and_is_dir = index_entries.remove(&entry.file_name());
         if metadata.is_dir() {
             if let Some(false) = in_index_and_is_dir {
                 // is dir, but was file -> remove file
                 changes.push(IndexChange::RemoveFile(rel_path.clone()));
             }
-            rec(
-                source,
-                &rel_path,
-                index_files,
-                changes,
-                ignore_paths,
-                settings,
-            )?;
+            rec(source, &rel_path, index_files, changes, ignore, settings)?;
         } else {
             if let Some(true) = in_index_and_is_dir {
                 // is file, but was dir -> remove dir

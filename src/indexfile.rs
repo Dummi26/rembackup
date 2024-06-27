@@ -29,8 +29,8 @@ impl IndexFile {
                             false
                         }
                     }
-                    (Some(new), None) => !settings.dont_replace_if_timestamp_found,
-                    (None, Some(old)) => settings.replace_if_timestamp_lost,
+                    (Some(_), None) => !settings.dont_replace_if_timestamp_found,
+                    (None, Some(_)) => settings.replace_if_timestamp_lost,
                     (None, None) => settings.replace_if_timestamp_unknown,
                 })
     }
