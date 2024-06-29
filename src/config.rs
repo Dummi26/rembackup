@@ -7,7 +7,7 @@ use std::{
 #[derive(Clone, Copy, Debug)]
 pub struct FsEntry<'a> {
     pub path: &'a Path,
-    pub is_directory: bool,
+    pub is_directory: Option<bool>,
 }
 
 #[derive(Debug)]
@@ -73,12 +73,14 @@ impl Specifier {
         match self {
             Self::Except(inner) => inner.matches(entry).map(std::ops::Not::not),
             Self::Entries(path) => path.matches(entry.path).then_some(true),
-            Self::Files(path) => (!entry.is_directory && path.matches(entry.path)).then_some(true),
+            Self::Files(path) => {
+                (entry.is_directory == Some(false) && path.matches(entry.path)).then_some(true)
+            }
             Self::InDir { dir, inner } => {
                 if inner.0.is_empty() {
                     // this has no inner things, so we just check for this directory
                     // if this is a directory and it matches, then return true
-                    (entry.is_directory && dir.matches(entry.path)).then_some(true)
+                    (entry.is_directory == Some(true) && dir.matches(entry.path)).then_some(true)
                 } else {
                     // this has inner things, so, for every matching parent,
                     // get the relative path (by removing the parent), ...

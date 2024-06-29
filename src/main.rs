@@ -79,8 +79,11 @@ fn main() {
         &args.settings,
     ) {
         Ok(c) => c,
-        Err(e) => {
-            eprintln!("Failed to generate index diff:\n    {e}");
+        Err((what, path, err)) => {
+            eprintln!(
+                "Failed to generate index diff:\n    {what}\n    {}\n    {err}",
+                path.to_string_lossy()
+            );
             exit(EXIT_DIFF_FAILED as _);
         }
     };

@@ -1,4 +1,8 @@
-use std::{collections::HashMap, fs, io, path::Path};
+use std::{
+    collections::HashMap,
+    fs, io,
+    path::{Path, PathBuf},
+};
 
 use clap::Args;
 
@@ -33,7 +37,7 @@ pub fn perform_index_diff<'a>(
     target: Option<&'a Path>,
     mut ignore: Ignore,
     settings: &Settings,
-) -> io::Result<Vec<IndexChange>> {
+) -> Result<Vec<IndexChange>, (String, PathBuf, io::Error)> {
     let mut changes = Vec::new();
     if let Ok(inner_index) = index.strip_prefix(source) {
         eprintln!("[info] source contains index at {inner_index:?}, but index will not be part of the backup.");
@@ -72,7 +76,7 @@ fn rec(
     changes: &mut Vec<IndexChange>,
     ignore: &Ignore,
     settings: &Settings,
-) -> Result<(), io::Error> {
+) -> Result<(), (String, PathBuf, io::Error)> {
     // used to find removals
     let index_rel_path = index_files.join(rel_path);
     let mut index_entries = match fs::read_dir(&index_rel_path) {
@@ -83,26 +87,43 @@ fn rec(
         Ok(e) => e
             .into_iter()
             .filter_map(|v| v.ok())
-            .map(|v| Ok((v.file_name(), v.file_type()?.is_dir())))
-            .collect::<Result<_, io::Error>>()?,
+            .map(|v| {
+                Ok((
+                    v.file_name(),
+                    v.file_type()
+                        .map_err(|e| ("getting file type".to_owned(), v.path(), e))?
+                        .is_dir(),
+                ))
+            })
+            .collect::<Result<_, (String, PathBuf, io::Error)>>()?,
     };
     // compare source files with index
-    let source_files = fs::read_dir(source.join(rel_path))?.collect::<Vec<_>>();
+    let source_files_path = source.join(rel_path);
+    let source_files = fs::read_dir(&source_files_path)
+        .map_err(|e| ("getting entries".to_owned(), source_files_path.clone(), e))?
+        .collect::<Vec<_>>();
     // find changes/adds
     for entry in source_files {
-        let entry = entry?;
+        let entry = entry.map_err(|e| {
+            (
+                "error with an entry within this directory".to_owned(),
+                source_files_path.clone(),
+                e,
+            )
+        })?;
         let rel_path = rel_path.join(entry.file_name());
-        let metadata = entry.metadata()?;
+        let metadata = entry.metadata();
 
         // ignore entries
         let fs_entry = FsEntry {
             path: &rel_path,
-            is_directory: metadata.is_dir(),
+            is_directory: metadata.as_ref().ok().map(|v| v.is_dir()),
         };
         if ignore.matches_or_default(&fs_entry) {
             continue;
         }
 
+        let metadata = metadata.map_err(|e| ("getting metadata (you have to ignore this using a * pattern instead of + or /, because we don't know if it's a directory or not)".to_owned(), entry.path(), e))?;
         let in_index_and_is_dir = index_entries.remove(&entry.file_name());
         if metadata.is_dir() {
             if let Some(false) = in_index_and_is_dir {

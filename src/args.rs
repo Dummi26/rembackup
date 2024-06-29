@@ -20,6 +20,7 @@ pub struct Args {
     #[arg(long)]
     pub noconfirm: bool,
 
+    /// the file in which you specified what files/directories should be ignored
     #[arg(long)]
     pub ignore: Option<PathBuf>,
 
