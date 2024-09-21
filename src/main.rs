@@ -101,34 +101,34 @@ fn main() {
             }
         }
         eprintln!(" - - - - -");
-        eprintln!(
-            "  >> add directory | {}x",
-            changes
-                .iter()
-                .filter(|c| matches!(c, IndexChange::AddDir(..)))
-                .count()
-        );
-        eprintln!(
-            "  +  add/update file | {}x",
-            changes
-                .iter()
-                .filter(|c| matches!(c, IndexChange::AddFile(..)))
-                .count()
-        );
-        eprintln!(
-            "  -  remove file | {}x",
-            changes
-                .iter()
-                .filter(|c| matches!(c, IndexChange::RemoveFile(..)))
-                .count()
-        );
-        eprintln!(
-            " [-] remove directory (and all contents!) | {}x",
-            changes
-                .iter()
-                .filter(|c| matches!(c, IndexChange::RemoveDir(..)))
-                .count()
-        );
+        let add_dir_count = changes
+            .iter()
+            .filter(|c| matches!(c, IndexChange::AddDir(..)))
+            .count();
+        eprintln!("  >> add directory | {add_dir_count}x");
+        let (add_file_count, add_file_total_size_gib) = changes
+            .iter()
+            .filter_map(|c| {
+                if let IndexChange::AddFile(_, f) = c {
+                    Some(f)
+                } else {
+                    None
+                }
+            })
+            .fold((0, 0.0f64), |(c, s), f| {
+                (c + 1, s + f.size as f64 / (1024 * 1024 * 1024) as f64)
+            });
+        eprintln!("  +  add/update file | {add_file_count}x ({add_file_total_size_gib:.1} GiB)");
+        let remove_file_count = changes
+            .iter()
+            .filter(|c| matches!(c, IndexChange::RemoveFile(..)))
+            .count();
+        eprintln!("  -  remove file | {}x", remove_file_count);
+        let remove_dir_count = changes
+            .iter()
+            .filter(|c| matches!(c, IndexChange::RemoveDir(..)))
+            .count();
+        eprintln!(" [-] remove directory (and all contents!) | {remove_dir_count}x");
         // apply changes after confirming
         if !args.noconfirm {
             loop {
