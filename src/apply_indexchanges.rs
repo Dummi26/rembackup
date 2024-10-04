@@ -13,24 +13,81 @@ pub fn apply_indexchanges(
     index: &Path,
     target: &Option<PathBuf>,
     changes: &Vec<IndexChange>,
+    gib_total: Option<f64>,
 ) -> io::Result<()> {
-    let o = apply_indexchanges_int(source, index, target, changes);
+    let o = apply_indexchanges_int(source, index, target, changes, gib_total);
     eprintln!();
     o
 }
+
+fn eprint_constants(changes_total: usize, gib_total: f64) -> (usize, usize, usize) {
+    let changes_len_width = changes_total.to_string().len();
+    let gib_len_width = format!("{gib_total:.1}").len();
+    let prog_width =
+        (80usize /* term min width */ - 3 /* progress bar [, >, ] */ - 6/* slash, space, pipe, space, slash, space */)
+            .saturating_sub(changes_len_width + changes_len_width);
+    (prog_width, changes_len_width, gib_len_width)
+}
+fn eprint_status(
+    changes_applied: usize,
+    changes_total: usize,
+    gib_transferred: f64,
+    gib_total: f64,
+    prog_width: usize,
+    changes_len_width: usize,
+    gib_len_width: usize,
+) {
+    let leftpad = prog_width.min(
+        (prog_width as f64
+            * f64::min(
+                changes_applied as f64 / changes_total as f64,
+                gib_transferred / gib_total,
+            ))
+        .round() as usize,
+    );
+    let changes_applied = changes_applied.to_string();
+    let changes_pad = " ".repeat(changes_len_width - changes_applied.len());
+    let gib_transferred = format!("{gib_transferred:.1}");
+    let gib_pad = " ".repeat(gib_len_width - gib_transferred.len());
+    let rightpad = prog_width - leftpad;
+    let completed_prog = "-".repeat(leftpad);
+    let pending_prog = " ".repeat(rightpad);
+    eprint!(
+        "\r{changes_pad}{changes_applied}/{changes_total} | {gib_pad}{gib_transferred}/{gib_total:.1}GiB [{completed_prog}>{pending_prog}]",
+
+    );
+}
+
 pub fn apply_indexchanges_int(
     source: &Path,
     index: &Path,
     target: &Option<PathBuf>,
     changes: &Vec<IndexChange>,
+    gib_total: Option<f64>,
 ) -> io::Result<()> {
-    let len_width = changes.len().to_string().len();
-    let width = 80 - 3 - 2 - len_width - len_width;
-    eprint!(
-        "{}0/{} [>{}]",
-        " ".repeat(len_width - 1),
-        changes.len(),
-        " ".repeat(width)
+    let changes_total = changes.len();
+    let gib_total = gib_total.unwrap_or_else(|| {
+        changes
+            .iter()
+            .filter_map(|c| {
+                if let IndexChange::AddFile(_, i) = c {
+                    Some(i.size as f64 / (1024 * 1024 * 1024) as f64)
+                } else {
+                    None
+                }
+            })
+            .sum()
+    });
+    let (prog_width, changes_len_width, gib_len_width) = eprint_constants(changes.len(), gib_total);
+    let mut gib_transferred = 0.0;
+    eprint_status(
+        0,
+        changes_total,
+        gib_transferred,
+        gib_total,
+        prog_width,
+        changes_len_width,
+        gib_len_width,
     );
     for (i, change) in changes.iter().enumerate() {
         match change {
@@ -57,6 +114,7 @@ pub fn apply_indexchanges_int(
                 }
             }
             IndexChange::AddFile(file, index_file) => {
+                gib_transferred += index_file.size as f64 / (1024 * 1024 * 1024) as f64;
                 let ok = if let Some(target) = target {
                     let s = source.join(file);
                     let t = target.join(file);
@@ -109,17 +167,14 @@ pub fn apply_indexchanges_int(
             }
         }
         {
-            let i = i + 1;
-            let leftpad = width * i / changes.len();
-            let rightpad = width - leftpad;
-            let prognum = i.to_string();
-            eprint!(
-                "\r{}{}/{} [{}>{}]",
-                " ".repeat(len_width - prognum.len()),
-                prognum,
+            eprint_status(
+                i + 1,
                 changes.len(),
-                "-".repeat(leftpad),
-                " ".repeat(rightpad)
+                gib_transferred,
+                gib_total,
+                prog_width,
+                changes_len_width,
+                gib_len_width,
             );
         }
     }

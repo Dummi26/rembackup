@@ -150,7 +150,13 @@ fn main() {
                 }
             }
         }
-        match apply_indexchanges(&args.source, &args.index, &args.target, &changes) {
+        match apply_indexchanges(
+            &args.source,
+            &args.index,
+            &args.target,
+            &changes,
+            Some(add_file_total_size_gib),
+        ) {
             Ok(()) => {}
             Err(e) => {
                 eprintln!("Failed to apply: {e}");
