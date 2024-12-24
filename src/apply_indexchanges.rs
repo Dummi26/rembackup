@@ -37,9 +37,17 @@ fn eprint_status(
     changes_len_width: usize,
     gib_len_width: usize,
 ) {
-    let leftpad = prog_width.min(
+    let leftpad_min = prog_width.min(
         (prog_width as f64
             * f64::min(
+                changes_applied as f64 / changes_total as f64,
+                gib_transferred / gib_total,
+            ))
+        .round() as usize,
+    );
+    let leftpad_max = prog_width.min(
+        (prog_width as f64
+            * f64::max(
                 changes_applied as f64 / changes_total as f64,
                 gib_transferred / gib_total,
             ))
@@ -49,11 +57,12 @@ fn eprint_status(
     let changes_pad = " ".repeat(changes_len_width - changes_applied.len());
     let gib_transferred = format!("{gib_transferred:.1}");
     let gib_pad = " ".repeat(gib_len_width - gib_transferred.len());
-    let rightpad = prog_width - leftpad;
-    let completed_prog = "-".repeat(leftpad);
+    let rightpad = prog_width - leftpad_max;
+    let completed_prog_min = "=".repeat(leftpad_min);
+    let completed_prog_max = "-".repeat(leftpad_max - leftpad_min);
     let pending_prog = " ".repeat(rightpad);
     eprint!(
-        "\r{changes_pad}{changes_applied}/{changes_total} | {gib_pad}{gib_transferred}/{gib_total:.1}GiB [{completed_prog}>{pending_prog}]",
+        "\r{changes_pad}{changes_applied}/{changes_total} | {gib_pad}{gib_transferred}/{gib_total:.1}GiB [{completed_prog_min}{completed_prog_max}>{pending_prog}]",
 
     );
 }
@@ -91,16 +100,10 @@ pub fn apply_indexchanges_int(
     );
     for (i, change) in changes.iter().enumerate() {
         match change {
-            IndexChange::AddDir(dir) => {
+            IndexChange::AddDir(dir, _) => {
                 let ok = if let Some(target) = target {
                     let t = target.join(dir);
-                    if let Some(e) = fs::create_dir(&t).err().and_then(|e| {
-                        if matches!(e.kind(), io::ErrorKind::AlreadyExists) {
-                            None
-                        } else {
-                            Some(e)
-                        }
-                    }) {
+                    if let Err(e) = fs::create_dir_all(&t) {
                         eprintln!("\n[warn] couldn't create directory {t:?}: {e}");
                         false
                     } else {
@@ -110,7 +113,7 @@ pub fn apply_indexchanges_int(
                     true
                 };
                 if ok {
-                    fs::create_dir(&index.join(dir))?;
+                    fs::create_dir_all(&index.join(dir))?;
                 }
             }
             IndexChange::AddFile(file, index_file) => {

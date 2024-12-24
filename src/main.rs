@@ -71,12 +71,17 @@ fn main() {
     } else {
         Ignore(vec![])
     };
-    let changes = match perform_index_diff(
+    let (total_size, changes) = match perform_index_diff(
         &source,
         &index,
         target.as_ref().map(|v| v.as_path()),
         ignore,
         &args.settings,
+        if args.settings.dont_sort {
+            None
+        } else {
+            Some(!args.settings.smallest_first)
+        },
     ) {
         Ok(c) => c,
         Err((what, path, err)) => {
@@ -92,12 +97,42 @@ fn main() {
     } else {
         eprintln!("done! found {} changes:", changes.len());
         // display the changes
-        for change in &changes {
+        if args.settings.dont_reverse_output {
+            for change in &changes {
+                show_change(change, false);
+            }
+        } else {
+            for change in changes.iter().rev() {
+                show_change(change, true);
+            }
+        }
+        fn show_change(change: &IndexChange, rev: bool) {
             match change {
-                IndexChange::AddDir(v) => eprintln!("  >> {}", v.display()),
-                IndexChange::AddFile(v, _) => eprintln!("  +  {}", v.display()),
+                IndexChange::AddDir(v, s) => {
+                    let mut path_str = v.display().to_string();
+                    if !path_str.ends_with(['/', '\\']) {
+                        path_str.push('/');
+                    }
+                    eprintln!(
+                        "{}>>  {}    [{:.2} GiB]",
+                        if rev { "^" } else { "v" },
+                        path_str,
+                        *s as f64 / (1024 * 1024 * 1024) as f64
+                    );
+                }
+                IndexChange::AddFile(v, f) => eprintln!(
+                    "  +  {}    ({:.3} GiB)",
+                    v.display(),
+                    f.size as f64 / (1024 * 1024 * 1024) as f64
+                ),
                 IndexChange::RemoveFile(v) => eprintln!("  -  {}", v.display()),
-                IndexChange::RemoveDir(v) => eprintln!(" [-] {}", v.display()),
+                IndexChange::RemoveDir(v) => {
+                    let mut path_str = v.display().to_string();
+                    if !path_str.ends_with(['/', '\\']) {
+                        path_str.push('/');
+                    }
+                    eprintln!(" [-] {}", path_str);
+                }
             }
         }
         eprintln!(" - - - - -");
@@ -105,8 +140,15 @@ fn main() {
             .iter()
             .filter(|c| matches!(c, IndexChange::AddDir(..)))
             .count();
-        eprintln!("  >> add directory | {add_dir_count}x");
-        let (add_file_count, add_file_total_size_gib) = changes
+        eprintln!(
+            " {}>> add directory | {add_dir_count}x",
+            if args.settings.dont_reverse_output {
+                "v"
+            } else {
+                "^"
+            }
+        );
+        let add_file_count = changes
             .iter()
             .filter_map(|c| {
                 if let IndexChange::AddFile(_, f) = c {
@@ -115,9 +157,8 @@ fn main() {
                     None
                 }
             })
-            .fold((0, 0.0f64), |(c, s), f| {
-                (c + 1, s + f.size as f64 / (1024 * 1024 * 1024) as f64)
-            });
+            .count();
+        let add_file_total_size_gib = total_size as f64 / (1024 * 1024 * 1024) as f64;
         eprintln!("  +  add/update file | {add_file_count}x ({add_file_total_size_gib:.1} GiB)");
         let remove_file_count = changes
             .iter()

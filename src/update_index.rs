@@ -14,6 +14,16 @@ use crate::{
 
 #[derive(Clone, Default, Args)]
 pub struct Settings {
+    /// don't sort the changes that form the backup. disables sort options.
+    #[arg(long)]
+    pub dont_sort: bool,
+    /// start with smaller directories rather than larger ones
+    #[arg(long)]
+    pub smallest_first: bool,
+    /// show changes in the order in which they will be applied, not reversed
+    #[arg(long)]
+    pub dont_reverse_output: bool,
+
     /// don't update files just because their timestamp is different
     #[arg(long)]
     pub ignore_timestamp: bool,
@@ -37,8 +47,8 @@ pub fn perform_index_diff<'a>(
     target: Option<&'a Path>,
     mut ignore: Ignore,
     settings: &Settings,
-) -> Result<Vec<IndexChange>, (String, PathBuf, io::Error)> {
-    let mut changes = Vec::new();
+    sort_by_size_largest: Option<bool>,
+) -> Result<(u64, Vec<IndexChange>), (String, PathBuf, io::Error)> {
     if let Ok(inner_index) = index.strip_prefix(source) {
         eprintln!("[info] source contains index at {inner_index:?}, but index will not be part of the backup.");
         ignore.0.push(Specifier::InDir {
@@ -55,15 +65,15 @@ pub fn perform_index_diff<'a>(
             });
         }
     }
-    rec(
+    let (total_size, changes) = rec(
         source.as_ref(),
         Path::new(""),
         index,
-        &mut changes,
         &ignore,
         settings,
+        sort_by_size_largest,
     )?;
-    Ok(changes)
+    Ok((total_size, changes))
 }
 fn rec(
     // location of source files
@@ -72,18 +82,17 @@ fn rec(
     rel_path: &Path,
     // location of the index
     index_files: &Path,
-    // list of changes to be made
-    changes: &mut Vec<IndexChange>,
     ignore: &Ignore,
     settings: &Settings,
-) -> Result<(), (String, PathBuf, io::Error)> {
+    sort_by_size_largest: Option<bool>,
+) -> Result<(u64, Vec<IndexChange>), (String, PathBuf, io::Error)> {
+    let mut removals = vec![];
+    let mut ichanges = vec![];
+    let mut total_size = 0;
     // used to find removals
     let index_rel_path = index_files.join(rel_path);
     let mut index_entries = match fs::read_dir(&index_rel_path) {
-        Err(_) => {
-            changes.push(IndexChange::AddDir(rel_path.to_path_buf()));
-            HashMap::new()
-        }
+        Err(_) => HashMap::new(),
         Ok(e) => e
             .into_iter()
             .filter_map(|v| v.ok())
@@ -128,29 +137,55 @@ fn rec(
         if metadata.is_dir() {
             if let Some(false) = in_index_and_is_dir {
                 // is dir, but was file -> remove file
-                changes.push(IndexChange::RemoveFile(rel_path.clone()));
+                removals.push(IndexChange::RemoveFile(rel_path.clone()));
             }
-            rec(source, &rel_path, index_files, changes, ignore, settings)?;
+            let (rec_size, rec_changes) = rec(
+                source,
+                &rel_path,
+                index_files,
+                ignore,
+                settings,
+                sort_by_size_largest,
+            )?;
+            total_size += rec_size;
+            ichanges.push((rec_size, rec_changes));
         } else {
             if let Some(true) = in_index_and_is_dir {
                 // is file, but was dir -> remove dir
-                changes.push(IndexChange::RemoveDir(rel_path.clone()));
+                removals.push(IndexChange::RemoveDir(rel_path.clone()));
             }
             let newif = IndexFile::new_from_metadata(&metadata);
             let oldif = IndexFile::from_path(&index_files.join(&rel_path));
             match oldif {
                 Ok(Ok(oldif)) if !newif.should_be_updated(&oldif, settings) => {}
-                _ => changes.push(IndexChange::AddFile(rel_path, newif)),
+                _ => {
+                    total_size += newif.size;
+                    ichanges.push((newif.size, vec![IndexChange::AddFile(rel_path, newif)]));
+                }
             }
         }
     }
     // removals
     for (removed_file, is_dir) in index_entries {
-        changes.push(if is_dir {
+        removals.push(if is_dir {
             IndexChange::RemoveDir(rel_path.join(removed_file))
         } else {
             IndexChange::RemoveFile(rel_path.join(removed_file))
         });
     }
-    Ok(())
+    // sorting
+    if let Some(sort_largest_first) = sort_by_size_largest {
+        if sort_largest_first {
+            ichanges.sort_by(|a, b| b.0.cmp(&a.0));
+        } else {
+            ichanges.sort_by_key(|v| v.0);
+        }
+    }
+    // combine everything
+    let changes = [IndexChange::AddDir(rel_path.to_path_buf(), total_size)]
+        .into_iter()
+        .chain(removals.into_iter())
+        .chain(ichanges.into_iter().flat_map(|(_, v)| v))
+        .collect();
+    Ok((total_size, changes))
 }
