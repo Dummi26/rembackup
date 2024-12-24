@@ -65,15 +65,18 @@ pub fn perform_index_diff<'a>(
             });
         }
     }
-    let (total_size, changes) = rec(
+    if let Some((total_size, changes)) = rec(
         source.as_ref(),
         Path::new(""),
         index,
         &ignore,
         settings,
         sort_by_size_largest,
-    )?;
-    Ok((total_size, changes))
+    )? {
+        Ok((total_size, changes))
+    } else {
+        Ok((0, vec![]))
+    }
 }
 fn rec(
     // location of source files
@@ -85,7 +88,7 @@ fn rec(
     ignore: &Ignore,
     settings: &Settings,
     sort_by_size_largest: Option<bool>,
-) -> Result<(u64, Vec<IndexChange>), (String, PathBuf, io::Error)> {
+) -> Result<Option<(u64, Vec<IndexChange>)>, (String, PathBuf, io::Error)> {
     let mut removals = vec![];
     let mut ichanges = vec![];
     let mut total_size = 0;
@@ -141,16 +144,17 @@ fn rec(
                 // is dir, but was file -> remove file
                 removals.push(IndexChange::RemoveFile(rel_path.clone()));
             }
-            let (rec_size, rec_changes) = rec(
+            if let Some((rec_size, rec_changes)) = rec(
                 source,
                 &rel_path,
                 index_files,
                 ignore,
                 settings,
                 sort_by_size_largest,
-            )?;
-            total_size += rec_size;
-            ichanges.push((rec_size, rec_changes));
+            )? {
+                total_size += rec_size;
+                ichanges.push((rec_size, rec_changes));
+            }
         } else {
             if let Some(true) = in_index_and_is_dir {
                 // is file, but was dir -> remove dir
@@ -184,6 +188,9 @@ fn rec(
         }
     }
     // combine everything
+    if !dir_is_new && removals.is_empty() && ichanges.is_empty() {
+        return Ok(None);
+    }
     let changes = [IndexChange::AddDir(
         rel_path.to_path_buf(),
         dir_is_new,
@@ -193,5 +200,5 @@ fn rec(
     .chain(removals.into_iter())
     .chain(ichanges.into_iter().flat_map(|(_, v)| v))
     .collect();
-    Ok((total_size, changes))
+    Ok(Some((total_size, changes)))
 }
