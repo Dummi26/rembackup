@@ -100,20 +100,22 @@ pub fn apply_indexchanges_int(
     );
     for (i, change) in changes.iter().enumerate() {
         match change {
-            IndexChange::AddDir(dir, _) => {
-                let ok = if let Some(target) = target {
-                    let t = target.join(dir);
-                    if let Err(e) = fs::create_dir_all(&t) {
-                        eprintln!("\n[warn] couldn't create directory {t:?}: {e}");
-                        false
+            IndexChange::AddDir(dir, make_new, _) => {
+                if *make_new {
+                    let ok = if let Some(target) = target {
+                        let t = target.join(dir);
+                        if let Err(e) = fs::create_dir_all(&t) {
+                            eprintln!("\n[warn] couldn't create directory {t:?}: {e}");
+                            false
+                        } else {
+                            true
+                        }
                     } else {
                         true
+                    };
+                    if ok {
+                        fs::create_dir_all(&index.join(dir))?;
                     }
-                } else {
-                    true
-                };
-                if ok {
-                    fs::create_dir_all(&index.join(dir))?;
                 }
             }
             IndexChange::AddFile(file, index_file) => {

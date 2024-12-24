@@ -91,20 +91,22 @@ fn rec(
     let mut total_size = 0;
     // used to find removals
     let index_rel_path = index_files.join(rel_path);
-    let mut index_entries = match fs::read_dir(&index_rel_path) {
-        Err(_) => HashMap::new(),
-        Ok(e) => e
-            .into_iter()
-            .filter_map(|v| v.ok())
-            .map(|v| {
-                Ok((
-                    v.file_name(),
-                    v.file_type()
-                        .map_err(|e| ("getting file type".to_owned(), v.path(), e))?
-                        .is_dir(),
-                ))
-            })
-            .collect::<Result<_, (String, PathBuf, io::Error)>>()?,
+    let (mut index_entries, dir_is_new) = match fs::read_dir(&index_rel_path) {
+        Err(_) => (HashMap::new(), true),
+        Ok(e) => (
+            e.into_iter()
+                .filter_map(|v| v.ok())
+                .map(|v| {
+                    Ok((
+                        v.file_name(),
+                        v.file_type()
+                            .map_err(|e| ("getting file type".to_owned(), v.path(), e))?
+                            .is_dir(),
+                    ))
+                })
+                .collect::<Result<_, (String, PathBuf, io::Error)>>()?,
+            false,
+        ),
     };
     // compare source files with index
     let source_files_path = source.join(rel_path);
@@ -182,10 +184,14 @@ fn rec(
         }
     }
     // combine everything
-    let changes = [IndexChange::AddDir(rel_path.to_path_buf(), total_size)]
-        .into_iter()
-        .chain(removals.into_iter())
-        .chain(ichanges.into_iter().flat_map(|(_, v)| v))
-        .collect();
+    let changes = [IndexChange::AddDir(
+        rel_path.to_path_buf(),
+        dir_is_new,
+        total_size,
+    )]
+    .into_iter()
+    .chain(removals.into_iter())
+    .chain(ichanges.into_iter().flat_map(|(_, v)| v))
+    .collect();
     Ok((total_size, changes))
 }

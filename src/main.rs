@@ -108,14 +108,15 @@ fn main() {
         }
         fn show_change(change: &IndexChange, rev: bool) {
             match change {
-                IndexChange::AddDir(v, s) => {
+                IndexChange::AddDir(v, new, s) => {
                     let mut path_str = v.display().to_string();
                     if !path_str.ends_with(['/', '\\']) {
                         path_str.push('/');
                     }
                     eprintln!(
-                        "{}>>  {}    [{:.2} GiB]",
+                        " {}{} {}    [{:.2} GiB]",
                         if rev { "^" } else { "v" },
+                        if *new { ">>" } else { "> " },
                         path_str,
                         *s as f64 / (1024 * 1024 * 1024) as f64
                     );
@@ -138,7 +139,7 @@ fn main() {
         eprintln!(" - - - - -");
         let add_dir_count = changes
             .iter()
-            .filter(|c| matches!(c, IndexChange::AddDir(..)))
+            .filter(|c| matches!(c, IndexChange::AddDir(_, true, _)))
             .count();
         eprintln!(
             " {}>> add directory | {add_dir_count}x",
