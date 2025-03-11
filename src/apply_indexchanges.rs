@@ -136,6 +136,46 @@ pub fn apply_indexchanges_int(
                     fs::write(&index.join(file), index_file.save())?;
                 }
             }
+            IndexChange::AddSymlink(file, link_target) => {
+                let cwd = std::env::current_dir()?;
+                let ok = if let Some(target) = target {
+                    let t = target.join(file);
+                    if let Some(p) = t.parent() {
+                        let t = t.file_name().expect("a file should always have a filename");
+                        std::env::set_current_dir(&p)?;
+                        let _ = std::fs::remove_file(t);
+                        if let Err(e) = std::os::unix::fs::symlink(&link_target, t) {
+                            eprintln!(
+                                    "\n[warn] couldn't set file {t:?} to be a symlink to {link_target:?}: {e}"
+                                );
+                            false
+                        } else {
+                            std::env::set_current_dir(&cwd)?;
+                            true
+                        }
+                    } else {
+                        eprintln!("\n[warn] symlink path was empty");
+                        false
+                    }
+                } else {
+                    true
+                };
+                if ok {
+                    let index_file = index.join(file);
+                    if let Some(p) = index_file.parent() {
+                        std::env::set_current_dir(&p)?;
+                        std::os::unix::fs::symlink(
+                            link_target,
+                            index_file
+                                .file_name()
+                                .expect("a file should always have a filename"),
+                        )?;
+                    } else {
+                        eprintln!("\n[warn] couldn't get parent for index file's path, so could not create the symlink");
+                    }
+                }
+                std::env::set_current_dir(&cwd)?;
+            }
             IndexChange::RemoveFile(file) => {
                 let i = index.join(file);
                 let ok = if let Some(target) = target {

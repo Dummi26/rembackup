@@ -126,6 +126,9 @@ fn main() {
                     v.display(),
                     f.size as f64 / (1024 * 1024 * 1024) as f64
                 ),
+                IndexChange::AddSymlink(v, link_target) => {
+                    eprintln!("  +  {}    (-> {})", v.display(), link_target.display())
+                }
                 IndexChange::RemoveFile(v) => eprintln!("  -  {}", v.display()),
                 IndexChange::RemoveDir(v) => {
                     let mut path_str = v.display().to_string();

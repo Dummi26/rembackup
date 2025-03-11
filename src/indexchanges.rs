@@ -8,7 +8,9 @@ pub enum IndexChange {
     AddDir(PathBuf, bool, u64),
     /// Add or update a file
     AddFile(PathBuf, IndexFile),
-    /// Remove a file
+    /// Same as `AddFile`, just that it creates a symlink pointing to the 2nd path
+    AddSymlink(PathBuf, PathBuf),
+    /// Remove a file or symlink
     RemoveFile(PathBuf),
     /// Remove a directory (recursively)
     RemoveDir(PathBuf),

@@ -125,8 +125,9 @@ fn rec(
                 e,
             )
         })?;
+        let entry_path = entry.path();
         let rel_path = rel_path.join(entry.file_name());
-        let metadata = entry.metadata();
+        let metadata = fs::symlink_metadata(&entry_path);
 
         // ignore entries
         let fs_entry = FsEntry {
@@ -137,7 +138,7 @@ fn rec(
             continue;
         }
 
-        let metadata = metadata.map_err(|e| ("getting metadata (you have to ignore this using a * pattern instead of + or /, because we don't know if it's a directory or not)".to_owned(), entry.path(), e))?;
+        let metadata = metadata.map_err(|e| ("getting metadata (you have to ignore this using a * pattern instead of + or /, because we don't know if it's a directory or not)".to_owned(), entry_path.clone(), e))?;
         let in_index_and_is_dir = index_entries.remove(&entry.file_name());
         if metadata.is_dir() {
             if let Some(false) = in_index_and_is_dir {
@@ -160,13 +161,94 @@ fn rec(
                 // is file, but was dir -> remove dir
                 removals.push(IndexChange::RemoveDir(rel_path.clone()));
             }
-            let newif = IndexFile::new_from_metadata(&metadata);
-            let oldif = IndexFile::from_path(&index_files.join(&rel_path));
-            match oldif {
-                Ok(Ok(oldif)) if !newif.should_be_updated(&oldif, settings) => {}
-                _ => {
-                    total_size += newif.size;
-                    ichanges.push((newif.size, vec![IndexChange::AddFile(rel_path, newif)]));
+            let index_file_path = index_files.join(&rel_path);
+            let new_is_symlink = metadata.is_symlink();
+            let old_is_symlink = index_file_path
+                .symlink_metadata()
+                .is_ok_and(|meta| meta.is_symlink());
+            if new_is_symlink && old_is_symlink {
+                // cd to file's parent directory, in case of relative links, just to be sure
+                let cwd = std::env::current_dir()
+                    .map_err(|e| (format!("couldn't get CWD"), entry_path.clone(), e))?;
+                std::env::set_current_dir(&source_files_path).map_err(|e| {
+                    (
+                        format!("could not set CWD to {}", source_files_path.display()),
+                        entry_path.clone(),
+                        e,
+                    )
+                })?;
+                let new_link = fs::read_link(&entry_path).map_err(|e| {
+                    (
+                        format!("couldn't read symlink contents"),
+                        entry_path.clone(),
+                        e,
+                    )
+                })?;
+                std::env::set_current_dir(&index_rel_path).map_err(|e| {
+                    (
+                        format!("could not set CWD to {}", index_rel_path.display()),
+                        entry_path.clone(),
+                        e,
+                    )
+                })?;
+                let old_link = fs::read_link(&index_file_path).map_err(|e| {
+                    (
+                        format!("couldn't read indexfile symlink contents"),
+                        entry_path.clone(),
+                        e,
+                    )
+                })?;
+                std::env::set_current_dir(&cwd).map_err(|e| {
+                    (
+                        format!("could not reset CWD to {}", cwd.display()),
+                        entry_path.clone(),
+                        e,
+                    )
+                })?;
+                if new_link != old_link {
+                    ichanges.push((0, vec![IndexChange::AddSymlink(rel_path, new_link)]));
+                }
+            } else if new_is_symlink {
+                let cwd = std::env::current_dir()
+                    .map_err(|e| (format!("couldn't get CWD"), entry_path.clone(), e))?;
+                std::env::set_current_dir(&source_files_path).map_err(|e| {
+                    (
+                        format!("could not set CWD to {}", source_files_path.display()),
+                        entry_path.clone(),
+                        e,
+                    )
+                })?;
+                let new_link = fs::read_link(&entry_path).map_err(|e| {
+                    (
+                        format!("couldn't read symlink contents"),
+                        entry_path.clone(),
+                        e,
+                    )
+                })?;
+                std::env::set_current_dir(&cwd).map_err(|e| {
+                    (
+                        format!("could not reset CWD to {}", cwd.display()),
+                        entry_path.clone(),
+                        e,
+                    )
+                })?;
+                if let Some(false) = in_index_and_is_dir {
+                    // was file before
+                    removals.push(IndexChange::RemoveFile(rel_path.clone()));
+                }
+                ichanges.push((0, vec![IndexChange::AddSymlink(rel_path, new_link)]));
+            } else {
+                let newif = IndexFile::new_from_metadata(&metadata);
+                let oldif = IndexFile::from_path(&index_file_path);
+                if old_is_symlink {
+                    removals.push(IndexChange::RemoveFile(rel_path.clone()));
+                }
+                match oldif {
+                    Ok(Ok(oldif)) if !newif.should_be_updated(&oldif, settings) => {}
+                    _ => {
+                        total_size += newif.size;
+                        ichanges.push((newif.size, vec![IndexChange::AddFile(rel_path, newif)]));
+                    }
                 }
             }
         }
