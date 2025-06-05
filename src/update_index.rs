@@ -14,10 +14,15 @@ use crate::{
 
 #[derive(Clone, Default, Args)]
 pub struct Settings {
-    /// don't sort the changes that form the backup. disables sort options.
+    /// don't sort the changes that form the backup
+    ///
+    /// disables sort options.
+    /// symlinks will still be created last.
     #[arg(long)]
     pub dont_sort: bool,
     /// start with smaller directories rather than larger ones
+    ///
+    /// symlinks will still be created last.
     #[arg(long)]
     pub smallest_first: bool,
     /// show changes in the order in which they will be applied, not reversed

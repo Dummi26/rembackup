@@ -4,6 +4,11 @@ use clap::Parser;
 
 use crate::update_index::Settings;
 
+/// rembackup,
+/// a simple backup tool for local or remote backups.
+/// run with --help for more help.
+///
+/// rembackup copies files from <source> to <target> using and storing information in <index>.
 #[derive(Parser)]
 #[command(author, version)]
 pub struct Args {

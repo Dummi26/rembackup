@@ -1,5 +1,5 @@
 use std::{
-    fs, io,
+    fs,
     path::{Path, PathBuf},
 };
 
@@ -12,12 +12,25 @@ pub fn apply_indexchanges(
     source: &Path,
     index: &Path,
     target: &Option<PathBuf>,
-    changes: &Vec<IndexChange>,
+    changes: &[IndexChange],
     gib_total: Option<f64>,
-) -> io::Result<()> {
-    let o = apply_indexchanges_int(source, index, target, changes, gib_total);
+) -> usize {
+    // do symlinks last, as they cd, which can fail,
+    // and if it does, it would be fatal and stop the backup.
+    let (mut changes, symlink_additions) =
+        changes.into_iter().partition::<Vec<_>, _>(|c| match c {
+            IndexChange::AddDir(..)
+            | IndexChange::AddFile(..)
+            | IndexChange::RemoveFile(..)
+            | IndexChange::RemoveDir(..) => true,
+            IndexChange::AddSymlink(..) => false,
+        });
+    changes.extend(symlink_additions);
+
+    let mut failures = changes.len();
+    apply_indexchanges_int(source, index, target, &changes, gib_total, &mut failures);
     eprintln!();
-    o
+    failures
 }
 
 fn eprint_constants(changes_total: usize, gib_total: f64) -> (usize, usize, usize) {
@@ -63,7 +76,6 @@ fn eprint_status(
     let pending_prog = " ".repeat(rightpad);
     eprint!(
         "\r{changes_pad}{changes_applied}/{changes_total} | {gib_pad}{gib_transferred}/{gib_total:.1}GiB [{completed_prog_min}{completed_prog_max}>{pending_prog}]",
-
     );
 }
 
@@ -71,9 +83,10 @@ pub fn apply_indexchanges_int(
     source: &Path,
     index: &Path,
     target: &Option<PathBuf>,
-    changes: &Vec<IndexChange>,
+    changes: &[&IndexChange],
     gib_total: Option<f64>,
-) -> io::Result<()> {
+    failures: &mut usize,
+) {
     let changes_total = changes.len();
     let gib_total = gib_total.unwrap_or_else(|| {
         changes
@@ -87,7 +100,7 @@ pub fn apply_indexchanges_int(
             })
             .sum()
     });
-    let (prog_width, changes_len_width, gib_len_width) = eprint_constants(changes.len(), gib_total);
+    let (prog_width, changes_len_width, gib_len_width) = eprint_constants(changes_total, gib_total);
     let mut gib_transferred = 0.0;
     eprint_status(
         0,
@@ -114,8 +127,14 @@ pub fn apply_indexchanges_int(
                         true
                     };
                     if ok {
-                        fs::create_dir_all(&index.join(dir))?;
+                        *failures -= 1;
+                        let t = index.join(dir);
+                        if let Err(e) = fs::create_dir_all(&t) {
+                            eprintln!("\n[warn] couldn't create index directory {t:?}: {e}");
+                        }
                     }
+                } else {
+                    *failures -= 1;
                 }
             }
             IndexChange::AddFile(file, index_file) => {
@@ -133,25 +152,42 @@ pub fn apply_indexchanges_int(
                     true
                 };
                 if ok {
-                    fs::write(&index.join(file), index_file.save())?;
+                    *failures -= 1;
+                    let t = index.join(file);
+                    if let Err(e) = fs::write(&t, index_file.save()) {
+                        eprintln!("\n[warn] couldn't save index file {t:?}: {e}");
+                    }
                 }
             }
             IndexChange::AddSymlink(file, link_target) => {
-                let cwd = std::env::current_dir()?;
+                let cwd = match std::env::current_dir() {
+                    Ok(cwd) => cwd,
+                    Err(e) => {
+                        eprintln!("\n[err] fatal: couldn't get cwd: {e}");
+                        return;
+                    }
+                };
                 let ok = if let Some(target) = target {
                     let t = target.join(file);
                     if let Some(p) = t.parent() {
                         let t = t.file_name().expect("a file should always have a filename");
-                        std::env::set_current_dir(&p)?;
-                        let _ = std::fs::remove_file(t);
-                        if let Err(e) = std::os::unix::fs::symlink(&link_target, t) {
-                            eprintln!(
-                                    "\n[warn] couldn't set file {t:?} to be a symlink to {link_target:?}: {e}"
-                                );
+                        if let Err(e) = std::env::set_current_dir(&p) {
+                            eprintln!("\n[warn] couldn't cd to {p:?}: {e}");
                             false
                         } else {
-                            std::env::set_current_dir(&cwd)?;
-                            true
+                            let _ = std::fs::remove_file(t);
+                            if let Err(e) = std::os::unix::fs::symlink(&link_target, t) {
+                                eprintln!(
+                                    "\n[warn] couldn't set file {t:?} to be a symlink to {link_target:?}: {e}"
+                                );
+                                false
+                            } else {
+                                if let Err(e) = std::env::set_current_dir(&cwd) {
+                                    eprintln!("\n[err] fatal: couldn't cd back to {cwd:?}: {e}");
+                                    return;
+                                }
+                                true
+                            }
                         }
                     } else {
                         eprintln!("\n[warn] symlink path was empty");
@@ -161,27 +197,42 @@ pub fn apply_indexchanges_int(
                     true
                 };
                 if ok {
+                    *failures -= 1;
                     let index_file = index.join(file);
                     if let Some(p) = index_file.parent() {
-                        std::env::set_current_dir(&p)?;
-                        std::os::unix::fs::symlink(
-                            link_target,
-                            index_file
-                                .file_name()
-                                .expect("a file should always have a filename"),
-                        )?;
+                        if let Err(e) = std::env::set_current_dir(&p) {
+                            eprintln!("\n[warn] couldn't cd to {p:?}: {e}");
+                        } else {
+                            if let Err(e) = std::os::unix::fs::symlink(
+                                link_target,
+                                index_file
+                                    .file_name()
+                                    .expect("a file should always have a filename"),
+                            ) {
+                                eprintln!(
+                                    "\n[warn] couldn't set index file {index_file:?} to be a symlink to {link_target:?}: {e}"
+                                );
+                            }
+                        }
                     } else {
-                        eprintln!("\n[warn] couldn't get parent for index file's path, so could not create the symlink");
+                        eprintln!(
+                            "\n[warn] couldn't get parent for index file's path, so could not create the symlink"
+                        );
                     }
                 }
-                std::env::set_current_dir(&cwd)?;
+                if let Err(e) = std::env::set_current_dir(&cwd) {
+                    eprintln!("\n[err] fatal: couldn't cd back to {cwd:?}: {e}");
+                    return;
+                }
             }
             IndexChange::RemoveFile(file) => {
                 let i = index.join(file);
                 let ok = if let Some(target) = target {
                     let t = target.join(file);
                     if let Err(e) = fs::remove_file(&t) {
-                        eprintln!("\n[warn] couldn't remove file {t:?}, keeping index file {i:?}: {e:?}\n     If this error keeps appearing, check if the file was deleted on the target system but still exists in the index. if yes, consider manually deleting it.");
+                        eprintln!(
+                            "\n[warn] couldn't remove file {t:?}, keeping index file {i:?}: {e:?}\n     If this error keeps appearing, check if the file was deleted on the target system but still exists in the index. if yes, consider manually deleting it."
+                        );
                         false
                     } else {
                         true
@@ -190,7 +241,10 @@ pub fn apply_indexchanges_int(
                     true
                 };
                 if ok {
-                    fs::remove_file(i)?;
+                    *failures -= 1;
+                    if let Err(e) = fs::remove_file(&i) {
+                        eprintln!("\n[warn] couldn't remove index file {i:?}: {e:?}");
+                    }
                 }
             }
             IndexChange::RemoveDir(dir) => {
@@ -198,7 +252,9 @@ pub fn apply_indexchanges_int(
                 let ok = if let Some(target) = target {
                     let t = target.join(dir);
                     if let Err(e) = fs::remove_dir_all(&t) {
-                        eprintln!("\n[warn] couldn't remove directory {t:?}, keeping index files under {i:?}: {e:?}\n     If this error keeps appearing, check if the directory was deleted on the target system but still exists in the index. if yes, consider manually deleting it.");
+                        eprintln!(
+                            "\n[warn] couldn't remove directory {t:?}, keeping index files under {i:?}: {e:?}\n     If this error keeps appearing, check if the directory was deleted on the target system but still exists in the index. if yes, consider manually deleting it."
+                        );
                         false
                     } else {
                         true
@@ -207,14 +263,17 @@ pub fn apply_indexchanges_int(
                     true
                 };
                 if ok {
-                    fs::remove_dir_all(i)?;
+                    *failures -= 1;
+                    if let Err(e) = fs::remove_dir_all(&i) {
+                        eprintln!("\n[warn] couldn't remove index directory {i:?}: {e:?}");
+                    }
                 }
             }
         }
         {
             eprint_status(
                 i + 1,
-                changes.len(),
+                changes_total,
                 gib_transferred,
                 gib_total,
                 prog_width,
@@ -223,5 +282,4 @@ pub fn apply_indexchanges_int(
             );
         }
     }
-    Ok(())
 }

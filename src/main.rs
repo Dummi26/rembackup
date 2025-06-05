@@ -17,7 +17,8 @@ mod update_index;
 
 const EXIT_IGNORE_FAILED: u8 = 200;
 const EXIT_DIFF_FAILED: u8 = 20;
-const EXIT_APPLY_FAILED: u8 = 30;
+const EXIT_APPLY_FAILED_ONE: u8 = 100;
+const EXIT_APPLY_FAILED_ALL: u8 = 200;
 
 fn main() {
     // get args
@@ -27,7 +28,7 @@ fn main() {
     let cwd = match std::env::current_dir() {
         Ok(v) => Some(v),
         Err(e) => {
-            eprintln!("[WARN] Couldn't get current directory (CWD): {e}");
+            eprintln!("[warn] Couldn't get current directory (CWD): {e}");
             None
         }
     };
@@ -178,7 +179,7 @@ fn main() {
         if !args.noconfirm {
             loop {
                 if args.target.is_none() {
-                    eprintln!("[WARN] You didn't set a `target` directory!\n[WARN] Be careful not to update your index without actually applying the changes to the `target` filesystem!\nType 'Ok' and press enter to continue.");
+                    eprintln!("[warn] You didn't set a `target` directory!\n[warn] Be careful not to update your index without actually applying the changes to the `target` filesystem!\nType 'Ok' and press enter to continue.");
                 } else {
                     eprintln!("Exclude unwanted directories/files using --ignore,\nor press enter to apply the changes.");
                 }
@@ -195,18 +196,19 @@ fn main() {
                 }
             }
         }
-        match apply_indexchanges(
+        let failure_count = apply_indexchanges(
             &args.source,
             &args.index,
             &args.target,
             &changes,
             Some(add_file_total_size_gib),
-        ) {
-            Ok(()) => {}
-            Err(e) => {
-                eprintln!("Failed to apply: {e}");
-                exit(EXIT_APPLY_FAILED as _);
-            }
+        );
+        eprintln!("[info] encountered {failure_count} failures");
+        if failure_count > 0 {
+            exit(
+                (EXIT_APPLY_FAILED_ONE as u64 + failure_count.ilog2() as u64)
+                    .min(EXIT_APPLY_FAILED_ALL as u64) as _,
+            );
         }
     }
 }
