@@ -203,12 +203,12 @@ pub fn apply_indexchanges_int(
                         if let Err(e) = std::env::set_current_dir(&p) {
                             eprintln!("\n[warn] couldn't cd to {p:?}: {e}");
                         } else {
-                            if let Err(e) = std::os::unix::fs::symlink(
-                                link_target,
-                                index_file
-                                    .file_name()
-                                    .expect("a file should always have a filename"),
-                            ) {
+                            let index_file_name = index_file
+                                .file_name()
+                                .expect("a file should always have a filename");
+                            let _ = std::fs::remove_file(&index_file_name);
+                            if let Err(e) = std::os::unix::fs::symlink(link_target, index_file_name)
+                            {
                                 eprintln!(
                                     "\n[warn] couldn't set index file {index_file:?} to be a symlink to {link_target:?}: {e}"
                                 );
