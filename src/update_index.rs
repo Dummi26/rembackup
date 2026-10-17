@@ -28,6 +28,10 @@ pub struct Settings {
     /// show changes in the order in which they will be applied, not reversed
     #[arg(long)]
     pub dont_reverse_output: bool,
+    /// hide files and directories below the specified size in GiB.
+    /// does not hide symlinks and file/directory removals.
+    #[arg(long, default_value = "0.0")]
+    pub hide_below_gib: f64,
 
     /// don't update files just because their timestamp is different
     #[arg(long)]
@@ -55,23 +59,27 @@ pub fn perform_index_diff<'a>(
     sort_by_size_largest: Option<bool>,
 ) -> Result<(u64, Vec<IndexChange>), (String, PathBuf, io::Error)> {
     if let Ok(inner_index) = index.strip_prefix(source) {
-        eprintln!("[info] source contains index at {inner_index:?}, but index will not be part of the backup.");
+        eprintln!(
+            "[info] source contains index at {inner_index:?}, but index will not be part of the backup."
+        );
         ignore.0.push(Specifier::InDir {
             dir: Match::Eq(inner_index.to_owned()),
             inner: Ignore(vec![]),
         });
     }
-    if let Some(target) = target {
-        if let Ok(inner_target) = target.strip_prefix(source) {
-            eprintln!("[info] source contains target at {inner_target:?}, but target will not be part of the backup.");
-            ignore.0.push(Specifier::InDir {
-                dir: Match::Eq(inner_target.to_owned()),
-                inner: Ignore(vec![]),
-            });
-        }
+    if let Some(target) = target
+        && let Ok(inner_target) = target.strip_prefix(source)
+    {
+        eprintln!(
+            "[info] source contains target at {inner_target:?}, but target will not be part of the backup."
+        );
+        ignore.0.push(Specifier::InDir {
+            dir: Match::Eq(inner_target.to_owned()),
+            inner: Ignore(vec![]),
+        });
     }
     if let Some((total_size, changes)) = rec(
-        source.as_ref(),
+        source,
         Path::new(""),
         index,
         &ignore,
@@ -174,7 +182,7 @@ fn rec(
             if new_is_symlink && old_is_symlink {
                 // cd to file's parent directory, in case of relative links, just to be sure
                 let cwd = std::env::current_dir()
-                    .map_err(|e| (format!("couldn't get CWD"), entry_path.clone(), e))?;
+                    .map_err(|e| ("couldn't get CWD".to_owned(), entry_path.clone(), e))?;
                 std::env::set_current_dir(&source_files_path).map_err(|e| {
                     (
                         format!("could not set CWD to {}", source_files_path.display()),
@@ -184,7 +192,7 @@ fn rec(
                 })?;
                 let new_link = fs::read_link(&entry_path).map_err(|e| {
                     (
-                        format!("couldn't read symlink contents"),
+                        "couldn't read symlink contents".to_owned(),
                         entry_path.clone(),
                         e,
                     )
@@ -198,7 +206,7 @@ fn rec(
                 })?;
                 let old_link = fs::read_link(&index_file_path).map_err(|e| {
                     (
-                        format!("couldn't read indexfile symlink contents"),
+                        "couldn't read indexfile symlink contents".to_owned(),
                         entry_path.clone(),
                         e,
                     )
@@ -215,7 +223,7 @@ fn rec(
                 }
             } else if new_is_symlink {
                 let cwd = std::env::current_dir()
-                    .map_err(|e| (format!("couldn't get CWD"), entry_path.clone(), e))?;
+                    .map_err(|e| ("couldn't get CWD".to_owned(), entry_path.clone(), e))?;
                 std::env::set_current_dir(&source_files_path).map_err(|e| {
                     (
                         format!("could not set CWD to {}", source_files_path.display()),
@@ -225,7 +233,7 @@ fn rec(
                 })?;
                 let new_link = fs::read_link(&entry_path).map_err(|e| {
                     (
-                        format!("couldn't read symlink contents"),
+                        "couldn't read symlink contents".to_owned(),
                         entry_path.clone(),
                         e,
                     )
@@ -269,7 +277,7 @@ fn rec(
     // sorting
     if let Some(sort_largest_first) = sort_by_size_largest {
         if sort_largest_first {
-            ichanges.sort_by(|a, b| b.0.cmp(&a.0));
+            ichanges.sort_by_key(|v| std::cmp::Reverse(v.0));
         } else {
             ichanges.sort_by_key(|v| v.0);
         }
@@ -284,7 +292,7 @@ fn rec(
         total_size,
     )]
     .into_iter()
-    .chain(removals.into_iter())
+    .chain(removals)
     .chain(ichanges.into_iter().flat_map(|(_, v)| v))
     .collect();
     Ok(Some((total_size, changes)))

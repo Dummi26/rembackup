@@ -17,14 +17,13 @@ pub fn apply_indexchanges(
 ) -> usize {
     // do symlinks last, as they cd, which can fail,
     // and if it does, it would be fatal and stop the backup.
-    let (mut changes, symlink_additions) =
-        changes.into_iter().partition::<Vec<_>, _>(|c| match c {
-            IndexChange::AddDir(..)
-            | IndexChange::AddFile(..)
-            | IndexChange::RemoveFile(..)
-            | IndexChange::RemoveDir(..) => true,
-            IndexChange::AddSymlink(..) => false,
-        });
+    let (mut changes, symlink_additions) = changes.iter().partition::<Vec<_>, _>(|c| match c {
+        IndexChange::AddDir(..)
+        | IndexChange::AddFile(..)
+        | IndexChange::RemoveFile(..)
+        | IndexChange::RemoveDir(..) => true,
+        IndexChange::AddSymlink(..) => false,
+    });
     changes.extend(symlink_additions);
 
     let mut failures = changes.len();
@@ -171,12 +170,12 @@ pub fn apply_indexchanges_int(
                     let t = target.join(file);
                     if let Some(p) = t.parent() {
                         let t = t.file_name().expect("a file should always have a filename");
-                        if let Err(e) = std::env::set_current_dir(&p) {
+                        if let Err(e) = std::env::set_current_dir(p) {
                             eprintln!("\n[warn] couldn't cd to {p:?}: {e}");
                             false
                         } else {
                             let _ = std::fs::remove_file(t);
-                            if let Err(e) = std::os::unix::fs::symlink(&link_target, t) {
+                            if let Err(e) = std::os::unix::fs::symlink(link_target, t) {
                                 eprintln!(
                                     "\n[warn] couldn't set file {t:?} to be a symlink to {link_target:?}: {e}"
                                 );
@@ -200,13 +199,13 @@ pub fn apply_indexchanges_int(
                     *failures -= 1;
                     let index_file = index.join(file);
                     if let Some(p) = index_file.parent() {
-                        if let Err(e) = std::env::set_current_dir(&p) {
+                        if let Err(e) = std::env::set_current_dir(p) {
                             eprintln!("\n[warn] couldn't cd to {p:?}: {e}");
                         } else {
                             let index_file_name = index_file
                                 .file_name()
                                 .expect("a file should always have a filename");
-                            let _ = std::fs::remove_file(&index_file_name);
+                            let _ = std::fs::remove_file(index_file_name);
                             if let Err(e) = std::os::unix::fs::symlink(link_target, index_file_name)
                             {
                                 eprintln!(

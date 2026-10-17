@@ -3,8 +3,10 @@ use std::process::exit;
 use clap::Parser;
 
 use crate::{
-    apply_indexchanges::apply_indexchanges, config::Ignore, indexchanges::IndexChange,
-    update_index::perform_index_diff,
+    apply_indexchanges::apply_indexchanges,
+    config::Ignore,
+    indexchanges::IndexChange,
+    update_index::{Settings, perform_index_diff},
 };
 
 mod apply_indexchanges;
@@ -75,7 +77,7 @@ fn main() {
     let (total_size, changes) = match perform_index_diff(
         &source,
         &index,
-        target.as_ref().map(|v| v.as_path()),
+        target.as_deref(),
         ignore,
         &args.settings,
         if args.settings.dont_sort {
@@ -98,45 +100,85 @@ fn main() {
     } else {
         eprintln!("done! found {} changes:", changes.len());
         // display the changes
+        let mut hidden = [0; 3];
         if args.settings.dont_reverse_output {
             for change in &changes {
-                show_change(change, false);
+                show_change(change, false, &mut hidden, &args.settings);
             }
         } else {
             for change in changes.iter().rev() {
-                show_change(change, true);
+                show_change(change, true, &mut hidden, &args.settings);
             }
         }
-        fn show_change(change: &IndexChange, rev: bool) {
+        show_hidden_changes(&mut hidden);
+        fn show_change(
+            change: &IndexChange,
+            rev: bool,
+            hidden: &mut [u64; 3],
+            settings: &Settings,
+        ) {
             match change {
                 IndexChange::AddDir(v, new, s) => {
-                    let mut path_str = v.display().to_string();
-                    if !path_str.ends_with(['/', '\\']) {
-                        path_str.push('/');
+                    let gib = *s as f64 / (1024 * 1024 * 1024) as f64;
+                    if gib < settings.hide_below_gib {
+                        hidden[0] += *s;
+                        hidden[2] += 1;
+                    } else {
+                        show_hidden_changes(hidden);
+                        let mut path_str = v.display().to_string();
+                        if !path_str.ends_with(['/', '\\']) {
+                            path_str.push('/');
+                        }
+                        eprintln!(
+                            " {}{} {}    [{:.2} GiB]",
+                            if rev { "^" } else { "v" },
+                            if *new { ">>" } else { "> " },
+                            path_str,
+                            gib,
+                        );
                     }
-                    eprintln!(
-                        " {}{} {}    [{:.2} GiB]",
-                        if rev { "^" } else { "v" },
-                        if *new { ">>" } else { "> " },
-                        path_str,
-                        *s as f64 / (1024 * 1024 * 1024) as f64
-                    );
                 }
-                IndexChange::AddFile(v, f) => eprintln!(
-                    "  +  {}    ({:.3} GiB)",
-                    v.display(),
-                    f.size as f64 / (1024 * 1024 * 1024) as f64
-                ),
+                IndexChange::AddFile(v, f) => {
+                    let gib = f.size as f64 / (1024 * 1024 * 1024) as f64;
+                    if gib < settings.hide_below_gib {
+                        hidden[0] += f.size;
+                        hidden[1] += 1;
+                    } else {
+                        eprintln!("  +  {}    ({:.3} GiB)", v.display(), gib);
+                    }
+                }
                 IndexChange::AddSymlink(v, link_target) => {
                     eprintln!("  +  {}    (-> {})", v.display(), link_target.display())
                 }
-                IndexChange::RemoveFile(v) => eprintln!("  -  {}", v.display()),
+                IndexChange::RemoveFile(v) => {
+                    eprintln!("  -  {}", v.display());
+                }
                 IndexChange::RemoveDir(v) => {
                     let mut path_str = v.display().to_string();
                     if !path_str.ends_with(['/', '\\']) {
                         path_str.push('/');
                     }
                     eprintln!(" [-] {}", path_str);
+                }
+            }
+        }
+        fn show_hidden_changes(hidden: &mut [u64; 3]) {
+            match std::mem::take(hidden) {
+                [0, 0, 0] => {}
+                [size, files, 0] => {
+                    let gib = size as f64 / (1024 * 1024 * 1024) as f64;
+                    eprintln!("  +  {} files    ({:.3} GiB total)", files, gib);
+                }
+                [size, 0, dirs] => {
+                    let gib = size as f64 / (1024 * 1024 * 1024) as f64;
+                    eprintln!("  +  {} directories    ({:.3} GiB total)", dirs, gib);
+                }
+                [size, files, dirs] => {
+                    let gib = size as f64 / (1024 * 1024 * 1024) as f64;
+                    eprintln!(
+                        "  +  {} files and {} directories    ({:.3} GiB total)",
+                        files, dirs, gib
+                    );
                 }
             }
         }
@@ -179,9 +221,13 @@ fn main() {
         if !args.noconfirm {
             loop {
                 if args.target.is_none() {
-                    eprintln!("[warn] You didn't set a `target` directory!\n[warn] Be careful not to update your index without actually applying the changes to the `target` filesystem!\nType 'Ok' and press enter to continue.");
+                    eprintln!(
+                        "[warn] You didn't set a `target` directory!\n[warn] Be careful not to update your index without actually applying the changes to the `target` filesystem!\nType 'Ok' and press enter to continue."
+                    );
                 } else {
-                    eprintln!("Exclude unwanted directories/files using --ignore,\nor press enter to apply the changes.");
+                    eprintln!(
+                        "Exclude unwanted directories/files using --ignore,\nor press enter to apply the changes."
+                    );
                 }
                 let line = if let Some(Ok(v)) = std::io::stdin().lines().next() {
                     v

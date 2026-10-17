@@ -93,7 +93,10 @@ impl Specifier {
                                 e.path = p;
                                 paths.push(e);
                             } else {
-                                eprintln!("[WARN] Parent {p:?} of path {:?} could not be removed... this is probably be a bug.", entry.path);
+                                eprintln!(
+                                    "[WARN] Parent {p:?} of path {:?} could not be removed... this is probably be a bug.",
+                                    entry.path
+                                );
                             }
                         }
                         path = p;
@@ -114,67 +117,64 @@ impl Ignore {
     fn parsei(lines: &mut Peekable<Enumerate<Lines>>, min_indent: usize) -> Result<Self, String> {
         let mut indent = None;
         let mut specifiers = vec![];
-        loop {
-            if let Some((line_nr, full_line)) = lines.peek() {
-                let line_nr = *line_nr;
-                let indent = {
-                    let line = full_line.trim_start();
-                    // check indentation
-                    let line_start_whitespace = &full_line[0..full_line.len() - line.len()];
-                    if let Some(c) = line_start_whitespace.chars().find(|c| *c != ' ') {
-                        return Err(format!(
+        while let Some((line_nr, full_line)) = lines.peek() {
+            let line_nr = *line_nr;
+            let indent = {
+                let line = full_line.trim_start();
+                // check indentation
+                let line_start_whitespace = &full_line[0..full_line.len() - line.len()];
+                if let Some(c) = line_start_whitespace.chars().find(|c| *c != ' ') {
+                    return Err(format!(
                         "Lines must start with any number of spaces, and no other whitespace character, but line {} contained the '{c:?}' character (Unicode {}).",
-                        line_nr + 1, c.escape_unicode()));
+                        line_nr + 1,
+                        c.escape_unicode()
+                    ));
+                }
+                let line_indent = line_start_whitespace.len();
+                if line_indent < min_indent {
+                    // less indentation than before, go up one layer of recursion
+                    break;
+                }
+                if let Some(indent) = indent {
+                    // check if we indent more/less than on the first line
+                    if line_indent != indent {
+                        return Err(format!(
+                            "Lines in one part of a config may must all have the same indentation! (expected {indent} spaces, but found {line_indent})"
+                        ));
                     }
-                    let line_indent = line_start_whitespace.len();
-                    if line_indent < min_indent {
-                        // less indentation than before, go up one layer of recursion
-                        break;
-                    }
-                    if let Some(indent) = indent {
-                        // check if we indent more/less than on the first line
-                        if line_indent != indent {
-                            return Err(format!(
-                                "Lines in one part of a config may must all have the same indentation! (expected {indent} spaces, but found {line_indent})"
-                            ));
-                        }
-                    } else {
-                        // store the first line's indent
-                        indent = Some(line_indent);
-                    }
-                    line_indent
-                };
-                // -- indentation is ok, this line belongs to us --
-                // because we only used `lines.peek()` until now
-                let line = lines.next().unwrap().1.trim_start();
-                if line.starts_with("#") {
-                    // comment, ignore
                 } else {
-                    let (line_type, args) =
-                        line.split_once(char::is_whitespace).unwrap_or((line, ""));
-                    specifiers.push(match line_type.to_lowercase().trim() {
-                        "except" => Specifier::Except(Ignore::parsei(lines, indent + 1)?),
-                        line_type => match (
-                            line_type.chars().next().unwrap_or(' '),
-                            line_type.chars().skip(1).next().unwrap_or(' '),
-                        ) {
-                            ('*', m) => Specifier::Entries(Match::parse_m(args, m, line_nr)?),
-                            ('+', m) => Specifier::Files(Match::parse_m(args, m, line_nr)?),
-                            ('/', m) => Specifier::InDir {
-                                dir: Match::parse_m(args, m, line_nr)?,
-                                inner: Ignore::parsei(lines, indent + 1)?,
-                            },
-                            _ => {
-                                return Err(format!(
+                    // store the first line's indent
+                    indent = Some(line_indent);
+                }
+                line_indent
+            };
+            // -- indentation is ok, this line belongs to us --
+            // because we only used `lines.peek()` until now
+            let line = lines.next().unwrap().1.trim_start();
+            if line.starts_with("#") {
+                // comment, ignore
+            } else {
+                let (line_type, args) = line.split_once(char::is_whitespace).unwrap_or((line, ""));
+                specifiers.push(match line_type.to_lowercase().trim() {
+                    "except" => Specifier::Except(Ignore::parsei(lines, indent + 1)?),
+                    line_type => match (
+                        line_type.chars().next().unwrap_or(' '),
+                        line_type.chars().nth(1).unwrap_or(' '),
+                    ) {
+                        ('*', m) => Specifier::Entries(Match::parse_m(args, m, line_nr)?),
+                        ('+', m) => Specifier::Files(Match::parse_m(args, m, line_nr)?),
+                        ('/', m) => Specifier::InDir {
+                            dir: Match::parse_m(args, m, line_nr)?,
+                            inner: Ignore::parsei(lines, indent + 1)?,
+                        },
+                        _ => {
+                            return Err(format!(
                                 "Got '{line}' (Line {}), but expected one of [[*+/][a=*], except]",
                                 line_nr + 1
-                            ))
-                            }
-                        },
-                    });
-                }
-            } else {
-                break;
+                            ));
+                        }
+                    },
+                });
             }
         }
         Ok(Self(specifiers))
@@ -190,7 +190,7 @@ impl Match {
                 return Err(format!(
                     "[Line {}] unknown match-type '{m}', expected one of [a=*]",
                     line_nr + 1
-                ))
+                ));
             }
         })
     }

@@ -66,7 +66,7 @@ impl ReprFile for IndexFile {
                 last_modified: age,
             })
         } else {
-            return Err(format!("no Len in IndexFile!"));
+            Err("no Len in IndexFile!".to_owned())
         }
     }
 }
